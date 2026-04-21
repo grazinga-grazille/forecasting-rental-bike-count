@@ -1,0 +1,8 @@
+# Here you can define all your datasets by using simple YAML syntax.
+#
+# Documentation for this file format can be found in "The Data Catalog"
+# Link: https://docs.kedro.org/en/stable/catalog-data/introduction/#data-catalog
+
+train_data:
+  type: pandas.ParquetDataset
+  filepath: data/01_raw/bike_data_train.parquet
