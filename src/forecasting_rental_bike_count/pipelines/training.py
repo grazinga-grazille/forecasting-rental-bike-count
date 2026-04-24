@@ -1,4 +1,4 @@
-from kedro.pipeline import node, Pipeline
+from kedro.pipeline import Pipeline, node
 from .nodes import make_target, split_data, train_model, predict, compute_metrics, save_model
 
 def create_training_pipeline() -> Pipeline:
@@ -32,5 +32,5 @@ def create_training_pipeline() -> Pipeline:
             func=save_model,
             inputs=["trained_model", "params:training.model_type", "params:model_storage"],
             outputs=None,
-        )
+        ),
     ])

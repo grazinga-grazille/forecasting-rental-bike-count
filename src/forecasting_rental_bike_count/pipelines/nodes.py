@@ -1,53 +1,66 @@
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Union
 from catboost import CatBoostRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from typing import Union
 import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 import joblib
 from pathlib import Path
 
 def rename_columns(df: pd.DataFrame, renaming_dict: Dict[str, str]) -> pd.DataFrame:
-    """
-    Rename columns in a DataFrame using a dictionary of old to new column names.
-    """
+    """Rename columns based on column mapping."""
     return df.rename(columns=renaming_dict)
 
-def create_lag_features(df: pd.DataFrame, lag_params: Dict[str, Any]) -> pd.DataFrame:
+
+def get_features(df: pd.DataFrame, lag_params: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.Timestamp]:
+    """Create lag features for time-series data.
+
+    Generates lagged versions of specified columns, useful for capturing
+    temporal patterns in time-series forecasting. Missing values at the
+    beginning of each lagged column are backfilled.
+
+    Args:
+        df: Input DataFrame containing the original features.
+        lag_params: Dictionary mapping feature names to lists of lag values.
+            Example: {"temperature": [1, 2, 3]} creates columns
+            "temperature_lag_1", "temperature_lag_2", "temperature_lag_3".
+
+    Returns:
+        DataFrame with original columns plus new lag feature columns.
     """
-    Create lag features in a DataFrame using a dictionary of column names and the number of lags.
-    """
-    for col, lag_params in lag_params.items():
-        for lag in lag_params:
-            df[f"{col}_lag_{lag}"] = df[col].shift(lag).bfill()
+    for feature, lags in lag_params.items():
+        for lag in lags:
+            df[f"{feature}_lag_{lag}"] = df[feature].shift(lag).bfill()
     timestamps = pd.to_datetime(df['datetime'])
     df.drop(columns=['datetime'], inplace=True)
     return df, timestamps
 
+
 def make_target(df: pd.DataFrame, target_params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Make a target column in a DataFrame using a dictionary of target parameters.
-    """
-    df[target_params['new_target_name']] = df[target_params['target_column']].shift(-target_params['shift_period']).ffill()
-    df.drop(columns=[target_params['target_column']], inplace=True)
+    """Create target column by shifting."""
+    df[target_params["new_target_name"]] = (
+        df[target_params["target_column"]].shift(-target_params["shift_period"]).ffill()
+    )
     return df
 
-def split_data(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Split a DataFrame into training and testing sets using a dictionary of split parameters.
-    """
+
+def split_data(
+    df: pd.DataFrame, 
+    params: Dict[str, Any]
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    """Split data into train/test sets."""
     # Get target column name
-    target_col = params["target_params"]['new_target_name']
-    # Get features column names
-    features_cols = [col for col in df.columns if col != target_col]
-    # Split data into training and testing sets
-    x, y = df[features_cols], df[target_col]
-    train_size = int(params['train_fraction'] * len(df))
-    x_train, x_test = x.iloc[:train_size], x.iloc[train_size:]
-    y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
+    target_name = params["target_params"]["new_target_name"]
+    # Get features columns names
+    features = [col for col in df.columns if col != target_name]
+    # Split data into train/test sets
+    x, y = df[features], df[target_name]
+    train_size = int(params["train_fraction"] * len(df))
+    x_train, x_test = x[:train_size], x[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
     return x_train, x_test, y_train, y_test
+
 
 def train_model(
     x_train: pd.DataFrame,
@@ -100,6 +113,7 @@ def predict(
     y_pred = pd.DataFrame(model.predict(x), columns=["prediction"])
     print(f"Predictions {y_pred}")
     return y_pred
+
 
 def compute_metrics(
     y_true: Union[np.ndarray, list], 
@@ -170,3 +184,52 @@ def save_model(
         # Use joblib for sklearn models
         joblib.dump(model, model_dir / f"{model_name}.pkl")
     return None
+
+
+def load_model(
+    model_type: str,
+    model_storage: Dict[str, Any],
+) -> Any:
+    """Load a model from disk.
+
+    Uses model-specific deserialization:
+    - CatBoost: native .cbm format
+    - Other models: joblib .pkl format
+
+    Args:
+        model_type: Type of model (for determining load format).
+        model_storage: Dictionary containing:
+            - path: Directory path where the model is stored.
+            - name: Model file name (without extension).
+
+    Returns:
+        Loaded model instance.
+    """
+    model_dir = Path(model_storage["path"])
+    model_name = model_storage["name"]
+    model_type = model_type.lower().strip()
+
+    if model_type in ["catboost", "cb"]:
+        # CatBoost has native deserialization
+        model = CatBoostRegressor()
+        model.load_model(str(model_dir / f"{model_name}.cbm"))
+    else:
+        # Use joblib for sklearn models
+        model = joblib.load(model_dir / f"{model_name}.pkl")
+
+    return model
+
+
+def load_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Timestamp]:
+    """Load data and extract last timestamp."""
+    last_timestamp = pd.to_datetime(df["datetime"]).iloc[-1]
+    return df, last_timestamp
+
+
+def join_timestamps(
+    predictions: pd.DataFrame,
+    timestamps: pd.Timestamp,
+) -> pd.DataFrame:
+    """Join timestamp to predictions."""
+    predictions["datetime"] = timestamps
+    return predictions
