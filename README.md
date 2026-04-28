@@ -1,10 +1,12 @@
 # Forecasting Rental Bike Count
 
+[![Live Demo](https://img.shields.io/badge/Live-Demo-blue)](http://67.205.148.207:8050)
+
 A machine learning pipeline for forecasting hourly rental bike demand. Built with [Kedro](https://kedro.org/) for reproducible, modular ML workflows.
 
 ## Overview
 
-This project predicts the number of rental bikes needed in the next hour using historical usage data enriched with weather, time-of-day, and seasonal features. It supports multiple regression models and is structured as a production-ready Kedro pipeline. [![Live Demo](https://img.shields.io/badge/Live-Demo-blue)](http://67.205.148.207:8050)
+This project predicts the number of rental bikes needed in the next hour using historical usage data enriched with weather, time-of-day, and seasonal features. It supports multiple regression models and is structured as a production-ready Kedro pipeline.
 
 ## Project Structure
 
