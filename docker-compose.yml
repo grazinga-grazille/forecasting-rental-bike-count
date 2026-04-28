@@ -14,9 +14,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./conf:/app/conf
-    depends_on:
-      ml-train:
-        condition: service_completed_successfully
 
   # WEB USER INTERFACE SERVICE
   app-ui:
