@@ -48,28 +48,30 @@ def run_inference() -> None:
 
     print(f"Starting inference: {num_steps} steps, batch_size={batch_size}")
 
-    for step in range(num_steps):
-        current_idx = first_idx + step
+    step = 0
+    while True:
+        offset = step % (len(data) - first_idx)
+        current_idx = first_idx + offset
+    
+        # When loop restarts, clear predictions file
+        if offset == 0 and step > 0:
+            predictions_path.unlink(missing_ok=True)
+            print("Restarting inference loop...")
+    
         batch_start = max(0, current_idx - batch_size + 1)
         batch_end = current_idx + 1
-
         batch = data.iloc[batch_start:batch_end].copy()
-
-        # Save batch to catalog location
+    
         batch_path = project_path / catalog["inference_batch"]["filepath"]
         batch_path.parent.mkdir(parents=True, exist_ok=True)
         batch.to_parquet(batch_path, index=False)
-
-        # Run pipeline
+    
         with KedroSession.create(project_path=project_path) as session:
             session.run(pipeline_name="inference")
-
-        print(f"[{step + 1}/{num_steps}] Prediction saved")
-
-        if step < num_steps - 1:
-            time.sleep(interval_seconds)
-
-    print("Inference loop completed!")
+    
+        print(f"[{step + 1}] Prediction saved")
+        step += 1
+        time.sleep(interval_seconds)
 
 if __name__ == "__main__":
     run_inference()
