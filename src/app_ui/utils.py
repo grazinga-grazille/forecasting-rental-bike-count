@@ -14,8 +14,8 @@ def load_data(path: Path) -> pd.DataFrame | None:
 
 
 def create_figure(
-    df_actual: pd.DataFrame, 
-    df_pred: pd.DataFrame | None, 
+    df_actual: pd.DataFrame,
+    df_pred: pd.DataFrame | None,
     lookback_hours: int,
     datetime_col: str = "datetime",
 ) -> go.Figure:

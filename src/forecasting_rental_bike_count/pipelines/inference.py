@@ -1,7 +1,8 @@
 """Inference Pipeline."""
 from kedro.pipeline import Pipeline, node
 
-from .nodes import load_model, predict, join_timestamps
+from .nodes import join_timestamps, load_model, predict
+
 
 def create_inference_pipeline() -> Pipeline:
     return Pipeline(
