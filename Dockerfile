@@ -18,13 +18,13 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy dependency files AND source code (needed for editable install with dynamic version)
 COPY pyproject.toml uv.lock* ./
 
-# Install dependencies
-RUN uv sync --no-dev --frozen
-
 COPY src ./src
 COPY conf ./conf
 COPY entrypoints ./entrypoints
 COPY data ./data
+
+# Install dependencies
+RUN uv sync --no-dev --frozen
 
 # Expose UI port
 EXPOSE 8050
