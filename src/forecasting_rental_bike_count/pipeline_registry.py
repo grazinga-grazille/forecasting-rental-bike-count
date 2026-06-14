@@ -1,7 +1,12 @@
-from .pipelines.feature_eng import feat_eng_pipeline_training, feat_eng_pipeline_inference
-from .pipelines.training import create_training_pipeline
-from .pipelines.inference import create_inference_pipeline
 from kedro.pipeline import Pipeline
+
+from .pipelines.feature_eng import (
+    feat_eng_pipeline_inference,
+    feat_eng_pipeline_training,
+)
+from .pipelines.inference import create_inference_pipeline
+from .pipelines.training import create_training_pipeline
+
 
 def register_pipelines() -> dict[str, Pipeline]:
     feature_eng_training = feat_eng_pipeline_training()

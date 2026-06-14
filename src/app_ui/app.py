@@ -1,18 +1,18 @@
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import dash
 import dash_bootstrap_components as dbc
 import yaml
 from dash import Input, Output, callback, dcc, html
 
+from app_ui.utils import create_figure, load_data
+
 # Project root and config
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root / "src"))
 os.chdir(project_root)
-
-from app_ui.utils import load_data, create_figure
 
 with open(project_root / "conf" / "base" / "parameters.yml") as f:
     config = yaml.safe_load(f)["ui"]
@@ -56,9 +56,9 @@ app.layout = dbc.Container([
 
 
 @callback(
-    Output("graph", "figure"), 
+    Output("graph", "figure"),
     [
-        Input("lookback-hours", "value"), 
+        Input("lookback-hours", "value"),
         Input("interval", "n_intervals")
         ]
     )

@@ -1,5 +1,7 @@
 from kedro.pipeline import Pipeline, node
-from .nodes import rename_columns, get_features, load_data
+
+from .nodes import get_features, load_data, rename_columns
+
 
 def create_feature_eng_pipeline() -> Pipeline:
     return Pipeline(

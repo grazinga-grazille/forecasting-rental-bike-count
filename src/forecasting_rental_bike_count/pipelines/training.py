@@ -1,5 +1,14 @@
 from kedro.pipeline import Pipeline, node
-from .nodes import make_target, split_data, train_model, predict, compute_metrics, save_model
+
+from .nodes import (
+    compute_metrics,
+    make_target,
+    predict,
+    save_model,
+    split_data,
+    train_model,
+)
+
 
 def create_training_pipeline() -> Pipeline:
     return Pipeline([

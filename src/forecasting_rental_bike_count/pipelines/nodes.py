@@ -1,19 +1,21 @@
+from pathlib import Path
+from typing import Any
+
+import joblib
+import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple, Union
 from catboost import CatBoostRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-import joblib
-from pathlib import Path
 
-def rename_columns(df: pd.DataFrame, renaming_dict: Dict[str, str]) -> pd.DataFrame:
+
+def rename_columns(df: pd.DataFrame, renaming_dict: dict[str, str]) -> pd.DataFrame:
     """Rename columns based on column mapping."""
     return df.rename(columns=renaming_dict)
 
 
-def get_features(df: pd.DataFrame, lag_params: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.Timestamp]:
+def get_features(df: pd.DataFrame, lag_params: dict[str, Any]) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Create lag features for time-series data.
 
     Generates lagged versions of specified columns, useful for capturing
@@ -37,7 +39,7 @@ def get_features(df: pd.DataFrame, lag_params: Dict[str, Any]) -> Tuple[pd.DataF
     return df, timestamps
 
 
-def make_target(df: pd.DataFrame, target_params: Dict[str, Any]) -> pd.DataFrame:
+def make_target(df: pd.DataFrame, target_params: dict[str, Any]) -> pd.DataFrame:
     """Create target column by shifting."""
     df[target_params["new_target_name"]] = (
         df[target_params["target_column"]].shift(-target_params["shift_period"]).ffill()
@@ -46,9 +48,9 @@ def make_target(df: pd.DataFrame, target_params: Dict[str, Any]) -> pd.DataFrame
 
 
 def split_data(
-    df: pd.DataFrame, 
-    params: Dict[str, Any]
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    df: pd.DataFrame,
+    params: dict[str, Any]
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """Split data into train/test sets."""
     # Get target column name
     target_name = params["target_params"]["new_target_name"]
@@ -65,7 +67,7 @@ def split_data(
 def train_model(
     x_train: pd.DataFrame,
     y_train: pd.Series,
-    params: Dict[str, Any],
+    params: dict[str, Any],
 ) -> Any:
     """Train a regression model with specified parameters.
 
@@ -111,14 +113,13 @@ def predict(
 ) -> pd.DataFrame:
     """Predict using a trained model."""
     y_pred = pd.DataFrame(model.predict(x), columns=["prediction"])
-    print(f"Predictions {y_pred}")
     return y_pred
 
 
 def compute_metrics(
-    y_true: Union[np.ndarray, list], 
-    y_pred: Union[np.ndarray, list]
-) -> Dict[str, float]:
+    y_true: np.ndarray | list,
+    y_pred: np.ndarray | list
+) -> dict[str, float]:
     """
     Compute evaluation metrics between true and predicted values.
 
@@ -141,24 +142,23 @@ def compute_metrics(
     """
     y_true = np.array(y_true).ravel()
     y_pred = np.array(y_pred).ravel()
-    
+
     mae = float(mean_absolute_error(y_true, y_pred))
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
 
     mape = np.mean(np.abs((y_true - y_pred) / y_true + 1e-8)) * 100
-    
+
     metrics = {
         'MAE': float(round(mae, 2)),
         'RMSE': float(round(rmse, 2)),
         'MAPE': float(round(mape, 2)),
     }
-    print(f"Metrics {metrics}")
     return metrics
 
 def save_model(
     model: Any,
     model_type: str,
-    model_storage: Dict[str, Any],
+    model_storage: dict[str, Any],
 ) -> None:
     """Persist the trained model to disk.
 
@@ -183,12 +183,11 @@ def save_model(
     else:
         # Use joblib for sklearn models
         joblib.dump(model, model_dir / f"{model_name}.pkl")
-    return None
 
 
 def load_model(
     model_type: str,
-    model_storage: Dict[str, Any],
+    model_storage: dict[str, Any],
 ) -> Any:
     """Load a model from disk.
 
@@ -220,7 +219,7 @@ def load_model(
     return model
 
 
-def load_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Timestamp]:
+def load_data(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Load data and extract last timestamp."""
     last_timestamp = pd.to_datetime(df["datetime"]).iloc[-1]
     return df, last_timestamp
