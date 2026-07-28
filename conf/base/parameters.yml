@@ -49,8 +49,17 @@ training:
 
 
 model_storage:
+  source: local  # local | mlflow
   path: data/06_models
   name: forecast_model
+
+
+mlflow:
+  tracking_uri: sqlite:///mlruns/mlflow.db
+  experiment_name: bike_demand_forecast
+  registered_model_name: bike_demand_forecast
+  register_on_train: true
+  mae_gate_threshold: 50
 
 
 ui:
