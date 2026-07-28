@@ -9,6 +9,11 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from forecasting_rental_bike_count.mlflow_utils import (
+    configure_mlflow,
+    log_training_run,
+)
+
 
 def rename_columns(df: pd.DataFrame, renaming_dict: dict[str, str]) -> pd.DataFrame:
     """Rename columns based on column mapping."""
@@ -183,6 +188,33 @@ def save_model(
     else:
         # Use joblib for sklearn models
         joblib.dump(model, model_dir / f"{model_name}.pkl")
+
+
+def log_model_to_mlflow(
+    model: Any,
+    metrics: dict[str, float],
+    training_params: dict[str, Any],
+    mlflow_params: dict[str, Any],
+) -> str:
+    """Configure MLflow and log the trained model, params, and metrics.
+
+    Also registers the model when ``register_on_train`` is true in mlflow params.
+    Local disk save via ``save_model`` remains separate.
+    """
+    configure_mlflow(
+        tracking_uri=mlflow_params["tracking_uri"],
+        experiment_name=mlflow_params["experiment_name"],
+    )
+    model_type = str(training_params["model_type"])
+    return log_training_run(
+        params=training_params,
+        metrics=metrics,
+        model=model,
+        model_type=model_type,
+        registered_model_name=mlflow_params.get("registered_model_name"),
+        register_on_train=bool(mlflow_params.get("register_on_train", False)),
+        run_name=f"train_{model_type}",
+    )
 
 
 def load_model(

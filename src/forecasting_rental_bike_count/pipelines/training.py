@@ -2,6 +2,7 @@ from kedro.pipeline import Pipeline, node
 
 from .nodes import (
     compute_metrics,
+    log_model_to_mlflow,
     make_target,
     predict,
     save_model,
@@ -41,5 +42,15 @@ def create_training_pipeline() -> Pipeline:
             func=save_model,
             inputs=["trained_model", "params:training.model_type", "params:model_storage"],
             outputs=None,
+        ),
+        node(
+            func=log_model_to_mlflow,
+            inputs=[
+                "trained_model",
+                "metrics",
+                "params:training",
+                "params:mlflow",
+            ],
+            outputs="mlflow_run_id",
         ),
     ])
