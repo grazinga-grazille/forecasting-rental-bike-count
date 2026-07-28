@@ -28,10 +28,13 @@ training:
 
   model_params:
     catboost:
-      learning_rate: 0.2
+      learning_rate: 0.06050932772168376
       depth: 6
-      l2_leaf_reg: 1
-      iterations: 50 # 500
+      l2_leaf_reg: 1.4634267036714088
+      bagging_temperature: 0.27768283284999584
+      random_strength: 0.1784658242263378
+      min_data_in_leaf: 31
+      iterations: 316
       loss_function: RMSE
       verbose: 0
       random_seed: 42

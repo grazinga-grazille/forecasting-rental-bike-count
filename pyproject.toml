@@ -25,6 +25,7 @@ dependencies = [
     "matplotlib>=3.8",
     "kedro-viz>=12.3.0",
     "mlflow>=2.14",
+    "optuna>=3.6",
 ]
 
 [project.scripts]
