@@ -11,6 +11,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from forecasting_rental_bike_count.mlflow_utils import (
     configure_mlflow,
+    load_champion_model,
     log_training_run,
 )
 
@@ -116,9 +117,19 @@ def predict(
     model: Any,
     x: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Predict using a trained model."""
-    y_pred = pd.DataFrame(model.predict(x), columns=["prediction"])
-    return y_pred
+    """Predict using a trained model.
+
+    Normalizes native estimators and MLflow pyfunc outputs to a single-column
+    DataFrame named ``prediction``.
+    """
+    raw = model.predict(x)
+    if isinstance(raw, pd.DataFrame):
+        if "prediction" in raw.columns:
+            return raw[["prediction"]].copy()
+        out = raw.iloc[:, [0]].copy()
+        out.columns = ["prediction"]
+        return out
+    return pd.DataFrame({"prediction": np.asarray(raw).ravel()})
 
 
 def compute_metrics(
@@ -198,7 +209,8 @@ def log_model_to_mlflow(
 ) -> str:
     """Configure MLflow and log the trained model, params, and metrics.
 
-    Also registers the model when ``register_on_train`` is true in mlflow params.
+    Registers a model version when ``register_on_train`` is true. Does not
+    set the champion alias — that is a separate gated promote step.
     Local disk save via ``save_model`` remains separate.
     """
     configure_mlflow(
@@ -206,7 +218,7 @@ def log_model_to_mlflow(
         experiment_name=mlflow_params["experiment_name"],
     )
     model_type = str(training_params["model_type"])
-    return log_training_run(
+    run_id, _registered_version = log_training_run(
         params=training_params,
         metrics=metrics,
         model=model,
@@ -215,37 +227,67 @@ def log_model_to_mlflow(
         register_on_train=bool(mlflow_params.get("register_on_train", False)),
         run_name=f"train_{model_type}",
     )
+    return run_id
 
 
 def load_model(
     model_type: str,
     model_storage: dict[str, Any],
+    mlflow_params: dict[str, Any] | None = None,
 ) -> Any:
-    """Load a model from disk.
+    """Load a model from MLflow registry or local disk.
 
-    Uses model-specific deserialization:
-    - CatBoost: native .cbm format
-    - Other models: joblib .pkl format
+    ``model_storage.source`` selects the path:
+    - ``mlflow``: load ``models:/{registered_model_name}@{champion_alias}``
+      Falls back to local if champion alias not yet set.
+    - ``local``: CatBoost ``.cbm`` or joblib ``.pkl`` under ``path``/``name``
 
     Args:
-        model_type: Type of model (for determining load format).
-        model_storage: Dictionary containing:
-            - path: Directory path where the model is stored.
-            - name: Model file name (without extension).
+        model_type: Type of model (for local load format).
+        model_storage: Dict with ``source``, and for local: ``path``, ``name``.
+        mlflow_params: Required when ``source`` is ``mlflow``.
 
     Returns:
-        Loaded model instance.
+        Loaded model instance (native estimator or MLflow pyfunc).
     """
+    source = str(model_storage.get("source", "local")).lower().strip()
+
+    if source == "mlflow":
+        if not mlflow_params:
+            raise ValueError(
+                "params:mlflow is required when model_storage.source is 'mlflow'"
+            )
+        configure_mlflow(
+            tracking_uri=mlflow_params["tracking_uri"],
+            experiment_name=mlflow_params["experiment_name"],
+        )
+        try:
+            return load_champion_model(
+                registered_model_name=mlflow_params["registered_model_name"],
+                alias=str(mlflow_params.get("champion_alias", "champion")),
+            )
+        except ValueError:
+            # Champion not set yet; fall back to local model
+            print(
+                f"Champion alias not found. Falling back to local model at "
+                f"{model_storage['path']}/{model_storage['name']}"
+            )
+            source = "local"
+
+    if source != "local":
+        raise ValueError(
+            f"Unknown model_storage.source: {source!r}. "
+            "Expected 'local' or 'mlflow'."
+        )
+
     model_dir = Path(model_storage["path"])
     model_name = model_storage["name"]
     model_type = model_type.lower().strip()
 
     if model_type in ["catboost", "cb"]:
-        # CatBoost has native deserialization
         model = CatBoostRegressor()
         model.load_model(str(model_dir / f"{model_name}.cbm"))
     else:
-        # Use joblib for sklearn models
         model = joblib.load(model_dir / f"{model_name}.pkl")
 
     return model

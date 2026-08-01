@@ -152,5 +152,6 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# mlflow local runs
+# mlflow local runs (keep directory for Compose volume mounts)
 mlruns/*
+!mlruns/.gitkeep

@@ -9,7 +9,11 @@ def create_inference_pipeline() -> Pipeline:
         [
             node(
                 func=load_model,
-                inputs=["params:training.model_type", "params:model_storage"],
+                inputs=[
+                    "params:training.model_type",
+                    "params:model_storage",
+                    "params:mlflow",
+                ],
                 outputs="model",
             ),
             node(

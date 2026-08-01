@@ -1,0 +1,44 @@
+name: Train
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly Monday 06:00 UTC
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run training pipeline
+        run: uv run kedro run --pipeline=training
+
+      - name: Assert MAE gate
+        run: uv run python entrypoints/check_mae_gate.py
+
+      - name: Upload MLflow store
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns
+          path: mlruns/
+          if-no-files-found: error
+          retention-days: 14

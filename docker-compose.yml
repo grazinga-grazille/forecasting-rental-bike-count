@@ -1,19 +1,72 @@
 services:
+  # MLflow tracking UI / server (observational; shares ./mlruns with train & inference)
+  mlflow:
+    build: .
+    command:
+      [
+        "mlflow",
+        "server",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5000",
+        "--backend-store-uri",
+        "sqlite:///mlruns/mlflow.db",
+        "--default-artifact-root",
+        "/app/mlruns",
+      ]
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    working_dir: /app
+
   # ML MODEL TRAINING SERVICE
   ml-train:
     build: .
     command: ["python", "entrypoints/training.py"]
+    working_dir: /app
+    environment:
+      # Keep in sync with conf/base/parameters.yml; override for remote tracking later
+      MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+      MLFLOW_ARTIFACT_ROOT: /app/mlruns
     volumes:
       - ./data:/app/data
       - ./conf:/app/conf
+      - ./mlruns:/app/mlruns
+
+  # MODEL PROMOTION SERVICE
+  promote:
+    build: .
+    command: ["python", "entrypoints/promote.py"]
+    working_dir: /app
+    environment:
+      MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+      MLFLOW_ARTIFACT_ROOT: /app/mlruns
+    volumes:
+      - ./conf:/app/conf
+      - ./mlruns:/app/mlruns
+    depends_on:
+      ml-train:
+        condition: service_completed_successfully
 
   # ML INFERENCE SERVICE
   ml-inference:
     build: .
     command: ["python", "entrypoints/inference.py"]
+    working_dir: /app
+    environment:
+      MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+      MLFLOW_ARTIFACT_ROOT: /app/mlruns
     volumes:
       - ./data:/app/data
       - ./conf:/app/conf
+      - ./mlruns:/app/mlruns
+    depends_on:
+      ml-train:
+        condition: service_completed_successfully
+      promote:
+        condition: service_completed_successfully
 
   # WEB USER INTERFACE SERVICE
   app-ui:

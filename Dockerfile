@@ -26,7 +26,7 @@ COPY data ./data
 # Install dependencies
 RUN uv sync --no-dev --frozen
 
-# Expose UI port
-EXPOSE 8050
+# Dash UI + MLflow server ports
+EXPOSE 8050 5000
 
 CMD ["python", "entrypoints/training.py"]

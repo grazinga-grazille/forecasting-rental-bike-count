@@ -1,0 +1,92 @@
+name: Inference
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Workflow run ID whose mlruns artifact to use (empty = latest promote, else latest train)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  inference-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download mlruns artifact
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ inputs.artifact_run_id }}"
+          SOURCE=""
+
+          if [ -n "$RUN_ID" ]; then
+            SOURCE="run ${RUN_ID}"
+          else
+            RUN_ID=$(gh run list \
+              --workflow=promote.yml \
+              --status=success \
+              --limit 1 \
+              --json databaseId \
+              -q '.[0].databaseId')
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+              SOURCE="promote.yml run ${RUN_ID}"
+            else
+              RUN_ID=$(gh run list \
+                --workflow=train.yml \
+                --status=success \
+                --limit 1 \
+                --json databaseId \
+                -q '.[0].databaseId')
+              SOURCE="train.yml run ${RUN_ID}"
+            fi
+          fi
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "No mlruns artifact source found. Run Train (and preferably Promote) first."
+            exit 1
+          fi
+
+          echo "Downloading mlruns from ${SOURCE}"
+          gh run download "$RUN_ID" -n mlruns -D .
+          test -d mlruns
+          test -f mlruns/mlflow.db
+
+      - name: Ensure @champion alias
+        run: |
+          # Idempotent if already promoted; required when artifact came from train only
+          uv run python entrypoints/promote.py
+
+      - name: Run one-shot inference pipeline
+        run: uv run kedro run --pipeline=inference
+
+      - name: Verify predictions written
+        run: |
+          test -f data/07_model_output/predictions.parquet
+          uv run python - <<'PY'
+          import pandas as pd
+          preds = pd.read_parquet("data/07_model_output/predictions.parquet")
+          assert len(preds) > 0, "predictions parquet is empty"
+          assert "prediction" in preds.columns
+          print(f"OK: {len(preds)} rows, columns={list(preds.columns)}")
+          PY

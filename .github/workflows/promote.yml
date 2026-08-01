@@ -1,0 +1,79 @@
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Model version to promote (empty = latest registered)
+        required: false
+        type: string
+        default: ""
+      train_run_id:
+        description: Train workflow run ID to download mlruns from (empty = latest successful train)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  MLFLOW_TRACKING_URI: sqlite:///mlruns/mlflow.db
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download mlruns from train workflow
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ inputs.train_run_id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list \
+              --workflow=train.yml \
+              --status=success \
+              --limit 1 \
+              --json databaseId \
+              -q '.[0].databaseId')
+          fi
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "No successful train.yml run found. Run Train first."
+            exit 1
+          fi
+          echo "Downloading mlruns from train run ${RUN_ID}"
+          gh run download "$RUN_ID" -n mlruns -D .
+          test -d mlruns
+          test -f mlruns/mlflow.db
+
+      - name: Promote model to @champion
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if [ -n "$VERSION" ]; then
+            uv run python entrypoints/promote.py --version "$VERSION"
+          else
+            uv run python entrypoints/promote.py
+          fi
+
+      - name: Upload promoted MLflow store
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns
+          path: mlruns/
+          if-no-files-found: error
+          retention-days: 14

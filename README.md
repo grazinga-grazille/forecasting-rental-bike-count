@@ -2,161 +2,240 @@
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-blue)](http://67.205.148.207:8050)
 
-A machine learning pipeline for forecasting hourly rental bike demand. Built with [Kedro](https://kedro.org/) for reproducible, modular ML workflows.
+A machine learning pipeline for forecasting hourly rental bike demand. Built with [Kedro](https://kedro.org/) for reproducible workflows and [MLflow](https://mlflow.org/) for experiment tracking and model registry.
 
 ## Overview
 
-This project predicts the number of rental bikes needed in the next hour using historical usage data enriched with weather, time-of-day, and seasonal features. It supports multiple regression models and is structured as a production-ready Kedro pipeline.
+This project predicts the number of rental bikes needed in the next hour using historical usage data enriched with weather, time-of-day, and seasonal features. Training registers candidate models in MLflow; a gated promote step sets the `@champion` alias; inference loads that champion for serving.
+
+## Model lifecycle
+
+```text
+train  →  register version N  →  MAE gate + promote (@champion)  →  inference serves @champion
+```
+
+| Step | Command | What happens |
+|---|---|---|
+| Train | `kedro run --pipeline=training` | Fits model, logs params/metrics, **registers** a new version (does not go live) |
+| Promote | `python entrypoints/promote.py` | Reads run MAE; if ≤ `mae_gate_threshold`, sets `@champion` |
+| Infer | `kedro run --pipeline=inference` | Loads `models:/bike_demand_forecast@champion` when `model_storage.source: mlflow` |
+
+Optional version pin:
+
+```bash
+python entrypoints/promote.py --version 2
+```
+
+### Local vs MLflow serving
+
+In `conf/base/parameters.yml`:
+
+```yaml
+model_storage:
+  source: mlflow  # or local
+  path: data/06_models
+  name: forecast_model
+```
+
+- **`mlflow`** — inference loads the registry alias `@champion` (falls back to local `.cbm`/`.pkl` if the alias is missing)
+- **`local`** — inference loads `data/06_models/forecast_model.cbm` (or `.pkl`)
+
+Training always saves a local copy under `data/06_models/` as an offline cache, and logs to MLflow when configured.
+
+### Rollback
+
+Re-point `@champion` at a previous good version (no code change):
+
+```bash
+python entrypoints/promote.py --version 1
+```
+
+Inference keeps using `models:/bike_demand_forecast@champion`; only the alias target changes.
+
+### MLflow UI
+
+Shared store: `sqlite:///mlruns/mlflow.db` (directory `./mlruns`, gitignored except `.gitkeep`).
+
+**Docker Compose** (host port **5001** → container 5000):
+
+```bash
+docker compose up mlflow
+# open http://localhost:5001
+```
+
+**Local:**
+
+```bash
+mlflow server \
+  --backend-store-uri sqlite:///mlruns/mlflow.db \
+  --default-artifact-root ./mlruns \
+  --host 127.0.0.1 \
+  --port 5000
+# open http://localhost:5000
+```
+
+Override the tracking URI without editing YAML:
+
+```bash
+export MLFLOW_TRACKING_URI=sqlite:///mlruns/mlflow.db
+```
 
 ## Project Structure
 
 ```
 forecasting-rental-bike-count/
-├── conf/
-│   ├── base/
-│   │   ├── catalog.yml        # Dataset definitions
-│   │   └── parameters.yml     # Pipeline parameters (features, model config)
-│   └── local/                 # Local overrides (credentials, etc.)
-├── data/
-│   ├── 01_raw/                # Raw input data (Parquet)
-│   ├── 06_models/             # Serialized trained models
-│   └── ...                    # Intermediate Kedro data layers
-├── notebooks/
-│   └── Modeling.ipynb         # Exploratory modeling notebook
-├── src/
-│   └── forecasting_rental_bike_count/
-│       ├── pipelines/
-│       │   ├── feature_eng.py # Feature engineering pipeline
-│       │   ├── training.py    # Training pipeline
-│       │   └── nodes.py       # All pipeline node functions
-│       ├── pipeline_registry.py
-│       └── settings.py
+├── conf/base/
+│   ├── catalog.yml
+│   └── parameters.yml          # features, model, model_storage, mlflow
+├── data/                       # Parquet layers + local model cache
+├── mlruns/                     # MLflow DB + artifacts (Compose volume)
+├── entrypoints/
+│   ├── training.py
+│   ├── promote.py
+│   ├── check_mae_gate.py
+│   ├── inference.py
+│   └── app_ui.py
+├── notebooks/Modeling.ipynb
+├── .github/workflows/
+│   ├── ci.yml / cd.yml
+│   ├── train.yml / promote.yml / inference.yml
+├── src/forecasting_rental_bike_count/
+│   ├── mlflow_utils.py
+│   ├── pipelines/
+│   └── ...
+├── docker-compose.yml
 └── pyproject.toml
 ```
 
 ## Pipelines
 
-### Feature Engineering (`feature_eng`)
-1. **Rename columns** — maps raw dataset column names to human-readable names (e.g., `hr` → `hour`, `cnt` → `bike_count`)
-2. **Create lag features** — generates lag features for `bike_count`, `hour`, `temperature`, and `humidity` to capture temporal dependencies
+### Feature engineering
+
+1. **Rename columns** — e.g. `hr` → `hour`, `cnt` → `bike_count`
+2. **Lag features** — for `bike_count`, `hour`, `temperature`, `humidity`
 
 ### Training (`training`)
-1. **Make target** — shifts `bike_count` by one period to create a next-hour forecast target
-2. **Split data** — chronological 80/20 train-test split
-3. **Train model** — fits the selected regression model
-4. **Predict** — generates predictions on the test set
-5. **Compute metrics** — evaluates with MAE, RMSE, and MAPE
-6. **Save model** — persists the trained model to `data/06_models/`
+
+1. Make next-hour target  
+2. Chronological train/test split  
+3. Train selected model  
+4. Predict + compute MAE / RMSE / MAPE  
+5. Save local model under `data/06_models/`  
+6. Log to MLflow and register a model version (no `@champion` yet)
+
+### Inference (`inference`)
+
+1. Load model (`mlflow` `@champion` or `local` file)  
+2. Predict on the inference batch  
+3. Write `data/07_model_output/predictions.parquet`
 
 ## Supported Models
 
 | Model | Key | Notes |
 |---|---|---|
-| CatBoost | `catboost` / `cb` | Saved as `.cbm` (native format) |
-| Random Forest | `random_forest` / `rf` | Saved as `.pkl` via joblib |
-| Linear Regression | `linear_regression` / `linreg` | Saved as `.pkl` via joblib |
+| CatBoost | `catboost` / `cb` | Primary; local save as `.cbm` |
+| Random Forest | `random_forest` / `rf` | `.pkl` via joblib |
+| Linear Regression | `linear_regression` / `linreg` | `.pkl` via joblib |
 
-The active model is set in `conf/base/parameters.yml` under `training.model_type`.
+Active model: `training.model_type` in `parameters.yml`.
 
 ## Quickstart
 
 ### Prerequisites
 
 - Python 3.12
-- [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
+- [`uv`](https://github.com/astral-sh/uv) (recommended)
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone <repo-url>
 cd forecasting-rental-bike-count
-
-# Install dependencies
 uv sync
 # or: pip install -e ".[dev]"
 ```
 
-### Add Data
+### Data
 
-Place the raw training data at:
+Place training / inference parquet under `data/01_raw/` (e.g. `bike_data_train.parquet`, `bike_data_inference.parquet`) with at least: `datetime`, `season`, `hr`, `weekday`, `weathersit`, `temp`, `hum`, `windspeed`, `cnt`.
 
-```
-data/01_raw/bike_data_train.parquet
-```
-
-The dataset should contain at minimum: `datetime`, `season`, `hr`, `weekday`, `weathersit`, `temp`, `hum`, `windspeed`, `cnt`.
-
-### Run the Pipeline
+### Train → promote → infer (local)
 
 ```bash
-# Run the full pipeline (feature engineering + training)
-kedro run
-
-# Run only feature engineering
-kedro run --pipeline feature_eng
-
-# Run feature engineering + training
-kedro run --pipeline training
+uv run kedro run --pipeline=training
+uv run python entrypoints/promote.py
+uv run kedro run --pipeline=inference
 ```
 
-### Visualize the Pipeline
+### Docker Compose
+
+Train and inference share `./mlruns` with the MLflow service:
 
 ```bash
-kedro viz
+docker compose build
+docker compose up mlflow          # UI on http://localhost:5001
+docker compose run --rm ml-train
+uv run python entrypoints/promote.py   # on host against ./mlruns
+docker compose up ml-inference app-ui  # Dash on http://localhost:8050
 ```
 
-### Run Tests
+### Tests and lint
 
 ```bash
-pytest
+uv run pytest
+uv run ruff check src/ tests/
 ```
 
-### Lint
+### Pipeline viz
 
 ```bash
-ruff check src/
+uv run kedro viz
 ```
+
+## GitHub Actions
+
+| Workflow | Trigger | Role |
+|---|---|---|
+| `ci.yml` | PR / push to `main` | Lint, pytest, Docker build |
+| `cd.yml` | Push to `main` | Publish image to GHCR |
+| `train.yml` | Manual + weekly cron | Train, MAE gate, upload `mlruns` artifact |
+| `promote.yml` | Manual | Download train artifact, promote `@champion` |
+| `inference.yml` | Manual | Smoke inference against promoted (or train) artifact |
+
+Typical Actions order: **Train** → **Promote** → **Inference**. Runners are ephemeral; the registry is passed between jobs as the `mlruns` artifact.
 
 ## Configuration
 
-All pipeline behaviour is controlled via `conf/base/parameters.yml`:
+Key blocks in `conf/base/parameters.yml`:
 
 ```yaml
-feature_engineering:
-  rename_columns:          # Column rename mapping
-    ...
-  lag_params:              # Lag windows per feature
-    bike_count: [1, 2, 22, 23]
-    hour: [1, 2, 3]
-    temperature: [1, 2, 3]
-    humidity: [1, 2, 3]
-
 training:
-  target_params:
-    shift_period: 1        # Forecast horizon (hours)
-    target_column: bike_count
-  train_fraction: 0.8      # Train/test split ratio
-  model_type: catboost     # Active model
+  model_type: catboost
+  train_fraction: 0.8
   model_params:
-    catboost:
-      learning_rate: 0.2
-      depth: 6
-      iterations: 50
-      loss_function: RMSE
-      ...
+    catboost: { ... }
 
 model_storage:
+  source: mlflow          # local | mlflow
   path: data/06_models
   name: forecast_model
+
+mlflow:
+  tracking_uri: sqlite:///mlruns/mlflow.db
+  experiment_name: bike_demand_forecast
+  registered_model_name: bike_demand_forecast
+  register_on_train: true   # register only; promote sets @champion
+  champion_alias: champion
+  mae_gate_threshold: 50
 ```
 
 ## Tech Stack
 
-- **[Kedro](https://kedro.org/)** — pipeline orchestration and project structure
-- **[CatBoost](https://catboost.ai/)** — gradient boosting (primary model)
-- **[scikit-learn](https://scikit-learn.org/)** — Random Forest and Linear Regression
-- **[pandas](https://pandas.pydata.org/)** / **[NumPy](https://numpy.org/)** — data manipulation
-- **[Plotly Dash](https://dash.plotly.com/)** — interactive visualizations
-- **[Kedro-Viz](https://github.com/kedro-org/kedro-viz)** — pipeline visualization
-- **[ruff](https://docs.astral.sh/ruff/)** — linting and formatting
+- **[Kedro](https://kedro.org/)** — pipeline orchestration
+- **[MLflow](https://mlflow.org/)** — tracking + model registry (`@champion`)
+- **[CatBoost](https://catboost.ai/)** — primary model
+- **[scikit-learn](https://scikit-learn.org/)** — RF / linear baselines
+- **[Optuna](https://optuna.org/)** — hyperparameter search (notebook)
+- **[Plotly Dash](https://dash.plotly.com/)** — live demo UI
+- **[Docker Compose](https://docs.docker.com/compose/)** — train / inference / MLflow / UI services
+- **[ruff](https://docs.astral.sh/ruff/)** — linting
